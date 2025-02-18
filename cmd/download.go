@@ -14,12 +14,22 @@ var downloadCmd = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		for _, arg := range args {
-			if !utils.IsUrl(arg) {
-				fmt.Println("Invalid URL: ", arg)
+			typeUrl, err := utils.GetTypeUrl(arg)
+			if err != nil {
+				fmt.Println(err)
 				continue
 			}
 
-			fmt.Println("Downloading", arg)
+			switch typeUrl {
+			case utils.UrlTypeSpotifyTrack:
+				fmt.Println("Downloading track:", arg)
+			case utils.UrlTypeSpotifyAlbum:
+				fmt.Println("Downloading album:", arg)
+			case utils.UrlTypeSpotifyPlaylist:
+				fmt.Println("Downloading playlist:", arg)
+			default:
+				fmt.Println("Unknown URL type:", arg)
+			}
 		}
 
 	},
