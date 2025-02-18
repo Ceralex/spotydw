@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/Ceralex/spotydw/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -12,7 +13,15 @@ var downloadCmd = &cobra.Command{
 	Short: "Download a track, album or playlist from Spotify",
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("download called, args:", args)
+		for _, arg := range args {
+			if !utils.IsUrl(arg) {
+				fmt.Println("Invalid URL: ", arg)
+				continue
+			}
+
+			fmt.Println("Downloading", arg)
+		}
+
 	},
 }
 
