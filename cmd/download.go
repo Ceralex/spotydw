@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"log"
 
 	"github.com/Ceralex/spotydw/internal/parser"
 	"github.com/Ceralex/spotydw/internal/spotify"
@@ -10,44 +12,66 @@ import (
 
 // downloadCmd represents the download command
 var downloadCmd = &cobra.Command{
-	Use:   "download",
-	Short: "Download a track, album or playlist from Spotify",
-	Args:  cobra.MinimumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:   "download <URL> [URL...]",
+	Short: "Download a track, album, or playlist from Spotify",
+	Long: `Download audio from Spotify by providing a track, album, or playlist URL.
+	You can provide multiple URLs at once to download multiple resources.`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		// Initialize Spotify client once for all downloads
+		client, err := spotify.NewClient(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to initialize Spotify client: %w", err)
+		}
+
+		// Process each URL
 		for _, arg := range args {
-			typeUrl, err := parser.GetTypeUrl(arg)
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-
-			if typeUrl == parser.UrlTypeUnknown {
-				fmt.Println("Unknown URL type:", arg)
-				continue
-			}
-
-			id := spotify.ExtractId(arg)
-			switch typeUrl {
-			case parser.UrlTypeSpotifyTrack:
-				spotify.DownloadTrack(id)
-			case parser.UrlTypeSpotifyAlbum:
-				// TODO
-			case parser.UrlTypeSpotifyPlaylist:
-				// TODO
+			if err := processURL(ctx, client, arg); err != nil {
+				log.Printf("Error processing %s: %v", arg, err)
 			}
 		}
 
+		return nil
 	},
+}
+
+func processURL(ctx context.Context, client *spotify.Client, url string) error {
+	typeUrl, err := parser.GetTypeUrl(url)
+	if err != nil {
+		return fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	if typeUrl == parser.UrlTypeUnknown {
+		return fmt.Errorf("unknown URL type: %s", url)
+	}
+
+	id := spotify.ExtractID(url)
+	if id == "" {
+		return fmt.Errorf("failed to extract ID from URL: %s", url)
+	}
+
+	switch typeUrl {
+	case parser.UrlTypeSpotifyTrack:
+		if err := client.DownloadTrack(ctx, id); err != nil {
+			return fmt.Errorf("failed to download track: %w", err)
+		}
+	case parser.UrlTypeSpotifyAlbum:
+		return fmt.Errorf("album download not yet implemented")
+	case parser.UrlTypeSpotifyPlaylist:
+		return fmt.Errorf("playlist download not yet implemented")
+	default:
+		return fmt.Errorf("unsupported URL type: %s", url)
+	}
+
+	return nil
 }
 
 func init() {
 	rootCmd.AddCommand(downloadCmd)
 
 	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// downloadCmd.PersistentFlags().String("foo", "", "A help for foo")
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:

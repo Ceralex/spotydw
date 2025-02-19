@@ -2,6 +2,7 @@ package spotify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -13,7 +14,35 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 )
 
-func ExtractId(url string) string {
+// Client represents a Spotify API client
+type Client struct {
+	api *spotifyapi.Client
+}
+
+// NewClient creates a new authenticated Spotify client
+func NewClient(ctx context.Context) (*Client, error) {
+	clientID := os.Getenv("SPOTIFY_ID")
+	clientSecret := os.Getenv("SPOTIFY_SECRET")
+	if clientID == "" || clientSecret == "" {
+		return nil, errors.New("missing required environment variables: SPOTIFY_ID and/or SPOTIFY_SECRET")
+	}
+
+	config := &clientcredentials.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		TokenURL:     spotifyauth.TokenURL,
+	}
+
+	token, err := config.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	httpClient := spotifyauth.New().Client(ctx, token)
+	return &Client{api: spotifyapi.New(httpClient)}, nil
+}
+
+func ExtractID(url string) string {
 	// Find the last "/" in the URL
 	idStart := strings.LastIndex(url, "/")
 	if idStart < 0 {
@@ -29,44 +58,30 @@ func ExtractId(url string) string {
 	return id
 }
 
-func DownloadTrack(id string) error {
-	ctx := context.Background()
-	config := &clientcredentials.Config{
-		ClientID:     os.Getenv("SPOTIFY_ID"),
-		ClientSecret: os.Getenv("SPOTIFY_SECRET"),
-		TokenURL:     spotifyauth.TokenURL,
-	}
-
-	token, err := config.Token(ctx)
+func (c *Client) DownloadTrack(ctx context.Context, id string) error {
+	track, err := c.api.GetTrack(ctx, spotifyapi.ID(id))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get track: %w", err)
 	}
 
-	httpClient := spotifyauth.New().Client(ctx, token)
-	client := spotifyapi.New(httpClient)
-	results, err := client.GetTrack(ctx, spotifyapi.ID(id))
+	artistNames := make([]string, 0, len(track.Artists))
+	for _, artist := range track.Artists {
+		artistNames = append(artistNames, artist.Name)
+	}
+	searchQuery := fmt.Sprintf("%s %s", track.Name, strings.Join(artistNames, " "))
+
+	videos, err := youtube.SearchVideos(searchQuery)
 	if err != nil {
-		return err
+		return fmt.Errorf("youtube search failed: %w", err)
 	}
 
-	track := results.SimpleTrack
-	var values []string
-	for _, name := range track.Artists {
-		values = append(values, name.Name)
-	}
-	artists := strings.Join(values, ", ")
-
-	videos, err := youtube.SearchVideos(track.Name + " " + artists)
-	if err != nil {
-		return err
-	}
 	if len(videos) == 0 {
-		fmt.Println("No videos found for", track.Name)
-		return nil
+		return fmt.Errorf("no YouTube videos found for: %s", searchQuery)
 	}
 
 	video := youtube.FindClosestVideo(track.TimeDuration(), videos)
 
-	fmt.Printf("Downloading %#v\n", video)
+	// Implement actual download logic here
+	fmt.Printf("Downloading %s - %s [%s]\n", track.Name, strings.Join(artistNames, ", "), video.ID)
 	return nil
 }
