@@ -21,11 +21,19 @@ var downloadCmd = &cobra.Command{
 				continue
 			}
 
-			switch typeUrl {
-			case parser.UrlTypeSpotifyTrack, parser.UrlTypeSpotifyAlbum, parser.UrlTypeSpotifyPlaylist:
-				fmt.Println("Downloading id:", spotify.ExtractId(arg))
-			default:
+			if typeUrl == parser.UrlTypeUnknown {
 				fmt.Println("Unknown URL type:", arg)
+				continue
+			}
+
+			id := spotify.ExtractId(arg)
+			switch typeUrl {
+			case parser.UrlTypeSpotifyTrack:
+				spotify.DownloadTrack(id)
+			case parser.UrlTypeSpotifyAlbum:
+				// TODO
+			case parser.UrlTypeSpotifyPlaylist:
+				// TODO
 			}
 		}
 
