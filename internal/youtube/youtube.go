@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -73,7 +74,7 @@ type Text struct {
 	} `json:"runs"`
 }
 
-func Search(query string) ([]Video, error) {
+func SearchVideos(query string) ([]Video, error) {
 
 	body := map[string]interface{}{
 		"query":   query,
@@ -187,4 +188,18 @@ func parseDuration(duration string) (time.Duration, error) {
 func parseViews(views string) (uint64, error) {
 	views = strings.ReplaceAll(strings.ReplaceAll(views, " views", ""), ",", "")
 	return strconv.ParseUint(views, 10, 64)
+}
+func FindClosestVideo(target time.Duration, videos []Video) Video {
+	closest := videos[0]
+	minDiff := math.Abs(float64(target - videos[0].Duration))
+
+	for _, item := range videos[1:5] {
+		diff := math.Abs(float64(target - item.Duration))
+		if diff < minDiff {
+			closest = item
+			minDiff = diff
+		}
+	}
+
+	return closest
 }

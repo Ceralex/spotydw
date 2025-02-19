@@ -3,10 +3,10 @@ package spotify
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
+	"github.com/Ceralex/spotydw/internal/youtube"
 	_ "github.com/joho/godotenv/autoload"
 	spotifyapi "github.com/zmb3/spotify/v2"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
@@ -29,7 +29,7 @@ func ExtractId(url string) string {
 	return id
 }
 
-func DownloadTrack(id string) {
+func DownloadTrack(id string) error {
 	ctx := context.Background()
 	config := &clientcredentials.Config{
 		ClientID:     os.Getenv("SPOTIFY_ID"),
@@ -37,21 +37,36 @@ func DownloadTrack(id string) {
 		TokenURL:     spotifyauth.TokenURL,
 	}
 
-	println(os.Getenv("SPOTIFY_ID"))
-	println(os.Getenv("SPOTIFY_SECRET"))
 	token, err := config.Token(ctx)
 	if err != nil {
-		log.Fatalf("couldn't get token: %v", err)
+		return err
 	}
 
 	httpClient := spotifyauth.New().Client(ctx, token)
 	client := spotifyapi.New(httpClient)
 	results, err := client.GetTrack(ctx, spotifyapi.ID(id))
 	if err != nil {
-		log.Fatalf("couldn't get track: %v", err)
+		return err
 	}
 
-	// Print the track name and artist
 	track := results.SimpleTrack
-	fmt.Printf("Downloading %#v", track)
+	var values []string
+	for _, name := range track.Artists {
+		values = append(values, name.Name)
+	}
+	artists := strings.Join(values, ", ")
+
+	videos, err := youtube.SearchVideos(track.Name + " " + artists)
+	if err != nil {
+		return err
+	}
+	if len(videos) == 0 {
+		fmt.Println("No videos found for", track.Name)
+		return nil
+	}
+
+	video := youtube.FindClosestVideo(track.TimeDuration(), videos)
+
+	fmt.Printf("Downloading %#v\n", video)
+	return nil
 }
