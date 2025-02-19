@@ -3,7 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/Ceralex/spotydw/internal/utils"
+	"github.com/Ceralex/spotydw/internal/parser"
+	"github.com/Ceralex/spotydw/internal/spotify"
 	"github.com/spf13/cobra"
 )
 
@@ -14,19 +15,15 @@ var downloadCmd = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		for _, arg := range args {
-			typeUrl, err := utils.GetTypeUrl(arg)
+			typeUrl, err := parser.GetTypeUrl(arg)
 			if err != nil {
 				fmt.Println(err)
 				continue
 			}
 
 			switch typeUrl {
-			case utils.UrlTypeSpotifyTrack:
-				fmt.Println("Downloading track:", arg)
-			case utils.UrlTypeSpotifyAlbum:
-				fmt.Println("Downloading album:", arg)
-			case utils.UrlTypeSpotifyPlaylist:
-				fmt.Println("Downloading playlist:", arg)
+			case parser.UrlTypeSpotifyTrack, parser.UrlTypeSpotifyAlbum, parser.UrlTypeSpotifyPlaylist:
+				fmt.Println("Downloading id:", spotify.ExtractId(arg))
 			default:
 				fmt.Println("Unknown URL type:", arg)
 			}
