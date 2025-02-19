@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/Ceralex/spotydw/internal/youtube"
@@ -81,7 +82,14 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 
 	video := youtube.FindClosestVideo(track.TimeDuration(), videos)
 
-	// Implement actual download logic here
-	fmt.Printf("Downloading %s - %s [%s]\n", track.Name, strings.Join(artistNames, ", "), video.ID)
+	fmt.Println("Downloading track:", track.Name)
+	outputTemplate := fmt.Sprintf("%s.%%(ext)s", track.Name)
+	fullVideoUrl := fmt.Sprintf("https://youtu.be/%s", video.ID)
+
+	cmd := exec.Command("yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", outputTemplate, fullVideoUrl)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to download track: %w", err)
+	}
+
 	return nil
 }

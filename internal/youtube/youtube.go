@@ -193,7 +193,7 @@ func FindClosestVideo(target time.Duration, videos []Video) Video {
 	closest := videos[0]
 	minDiff := math.Abs(float64(target - videos[0].Duration))
 
-	for _, item := range videos[1:5] {
+	for _, item := range videos[1:5] { // Only check the first 5 videos
 		diff := math.Abs(float64(target - item.Duration))
 		if diff < minDiff {
 			closest = item
