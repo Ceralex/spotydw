@@ -83,12 +83,59 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 	video := youtube.FindClosestVideo(track.TimeDuration(), videos)
 
 	fmt.Println("Downloading track:", track.Name)
-	outputTemplate := fmt.Sprintf("%s.%%(ext)s", track.Name)
-	fullVideoUrl := fmt.Sprintf("https://youtu.be/%s", video.ID)
+	ytdlpCmd := exec.Command(
+		"yt-dlp",
+		"-x",
+		"--no-embed-metadata",
+		"-o", "-", // Output to stdout
+		fmt.Sprintf("https://youtu.be/%s", video.ID),
+	)
 
-	cmd := exec.Command("yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", outputTemplate, fullVideoUrl)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to download track: %w", err)
+	albumArtists := make([]string, 0, len(track.Album.Artists))
+	for _, artist := range track.Album.Artists {
+		albumArtists = append(albumArtists, artist.Name)
+	}
+	artistsStr := strings.Join(artistNames, "; ")
+	albumArtistsStr := strings.Join(albumArtists, "; ")
+	ffmpegCmd := exec.Command(
+		"ffmpeg",
+		"-i", "pipe:0", // Read from stdin
+		"-f", "jpeg_pipe",
+		"-i", track.Album.Images[0].URL,
+		"-metadata", fmt.Sprintf("title=%s", track.Name),
+		"-metadata", fmt.Sprintf("artist=%s", artistsStr),
+		"-metadata", fmt.Sprintf("album_artist=%s", albumArtistsStr),
+		"-metadata", fmt.Sprintf("album=%s", track.Album.Name),
+		"-metadata", fmt.Sprintf("track=%d/%d", track.TrackNumber, track.Album.TotalTracks),
+		"-metadata", fmt.Sprintf("date=%s", track.Album.ReleaseDate),
+		"-map", "0",
+		"-map", "1",
+		"-c:v", "mjpeg",
+		"-q:v", "2",
+		"-metadata:s:v", "title='Album cover'",
+		"-metadata:s:v", "comment='Cover (front)'",
+		"-y",
+		fmt.Sprintf("%s.mp3", track.Name),
+	)
+
+	// Pipe yt-dlp's output to ffmpeg's input
+	ffmpegCmd.Stdin, _ = ytdlpCmd.StdoutPipe()
+	ffmpegCmd.Stdout = nil
+	ffmpegCmd.Stderr = nil
+
+	// Start ffmpeg first
+	if err := ffmpegCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start ffmpeg: %v", err)
+	}
+
+	// Run yt-dlp and pipe to ffmpeg
+	if err := ytdlpCmd.Run(); err != nil {
+		return fmt.Errorf("failed to run yt-dlp: %v", err)
+	}
+
+	// Wait for ffmpeg to finish
+	if err := ffmpegCmd.Wait(); err != nil {
+		return fmt.Errorf("failed to process with ffmpeg: %v", err)
 	}
 
 	return nil
