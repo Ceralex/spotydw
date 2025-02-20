@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/Ceralex/spotydw/internal/utils"
 )
 
 type UrlType int
@@ -29,7 +31,7 @@ var (
 
 // GetTypeUrl determines the type of the URL based on its host and path
 func GetTypeUrl(str string) (UrlType, error) {
-	if !IsUrl(str) {
+	if !utils.IsUrl(str) {
 		return UrlTypeUnknown, errors.New("invalid URL")
 	}
 
@@ -55,12 +57,6 @@ func GetTypeUrl(str string) (UrlType, error) {
 
 	// If no specific type is matched, return unknown
 	return UrlTypeUnknown, nil
-}
-
-// IsUrl checks if a string is a valid URL
-func IsUrl(str string) bool {
-	_, err := url.ParseRequestURI(str)
-	return err == nil
 }
 
 func ExtractSpotifyID(url string) string {

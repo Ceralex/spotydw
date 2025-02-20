@@ -189,11 +189,12 @@ func parseViews(views string) (uint64, error) {
 	views = strings.ReplaceAll(strings.ReplaceAll(views, " views", ""), ",", "")
 	return strconv.ParseUint(views, 10, 64)
 }
+
 func FindClosestVideo(target time.Duration, videos []Video) Video {
 	closest := videos[0]
 	minDiff := math.Abs(float64(target - videos[0].Duration))
 
-	for _, item := range videos[1:5] { // Only check the first 5 videos
+	for _, item := range videos[1:] {
 		diff := math.Abs(float64(target - item.Duration))
 		if diff < minDiff {
 			closest = item

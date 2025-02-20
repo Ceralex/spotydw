@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/Ceralex/spotydw/internal/utils"
 	"github.com/Ceralex/spotydw/internal/youtube"
@@ -45,12 +46,7 @@ func NewClient(ctx context.Context) (*Client, error) {
 	return &Client{api: spotifyapi.New(httpClient)}, nil
 }
 
-func (c *Client) DownloadTrack(ctx context.Context, id string) error {
-	track, err := c.api.GetTrack(ctx, spotifyapi.ID(id))
-	if err != nil {
-		return fmt.Errorf("failed to get track: %w", err)
-	}
-
+func downloadSimpleTrack(track *spotifyapi.SimpleTrack, album *spotifyapi.SimpleAlbum, outFolder string) error {
 	artistNames := make([]string, 0, len(track.Artists))
 	for _, artist := range track.Artists {
 		artistNames = append(artistNames, artist.Name)
@@ -77,24 +73,26 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 		fmt.Sprintf("https://youtu.be/%s", video.ID),
 	)
 
-	albumArtists := make([]string, 0, len(track.Album.Artists))
-	for _, artist := range track.Album.Artists {
+	albumArtists := make([]string, 0, len(album.Artists))
+	for _, artist := range album.Artists {
 		albumArtists = append(albumArtists, artist.Name)
 	}
 	artistsStr := strings.Join(artistNames, "; ")
 	albumArtistsStr := strings.Join(albumArtists, "; ")
 
+	fileName := fmt.Sprintf("%s%s.mp3", outFolder, utils.SanitizeFileName(track.Name))
+
 	ffmpegCmd := exec.Command(
 		"ffmpeg",
 		"-i", "pipe:0", // Read from stdin
 		"-f", "jpeg_pipe",
-		"-i", track.Album.Images[0].URL,
+		"-i", album.Images[0].URL,
 		"-metadata", fmt.Sprintf("title=%s", track.Name),
 		"-metadata", fmt.Sprintf("artist=%s", artistsStr),
 		"-metadata", fmt.Sprintf("album_artist=%s", albumArtistsStr),
-		"-metadata", fmt.Sprintf("album=%s", track.Album.Name),
-		"-metadata", fmt.Sprintf("track=%d/%d", track.TrackNumber, track.Album.TotalTracks),
-		"-metadata", fmt.Sprintf("date=%s", track.Album.ReleaseDate),
+		"-metadata", fmt.Sprintf("album=%s", album.Name),
+		"-metadata", fmt.Sprintf("track=%d/%d", track.TrackNumber, album.TotalTracks),
+		"-metadata", fmt.Sprintf("date=%s", album.ReleaseDate),
 		"-map", "0",
 		"-map", "1",
 		"-c:v", "mjpeg",
@@ -102,7 +100,7 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 		"-metadata:s:v", "title='Album cover'",
 		"-metadata:s:v", "comment='Cover (front)'",
 		"-y",
-		fmt.Sprintf("%s.mp3", utils.SanitizeFileName(track.Name)),
+		fileName,
 	)
 
 	// Pipe yt-dlp's output to ffmpeg's input
@@ -111,7 +109,7 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to create stdout pipe for yt-dlp: %v", err)
 	}
 	ffmpegCmd.Stdout = nil
-	ffmpegCmd.Stderr = nil
+	ffmpegCmd.Stderr = os.Stderr
 
 	// Start ffmpeg first
 	if err := ffmpegCmd.Start(); err != nil {
@@ -128,5 +126,38 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to process with ffmpeg: %v", err)
 	}
 
+	return nil
+}
+
+func (c *Client) DownloadTrack(ctx context.Context, id string) error {
+	track, err := c.api.GetTrack(ctx, spotifyapi.ID(id))
+
+	if err != nil {
+		return fmt.Errorf("failed to get track: %w", err)
+	}
+
+	return downloadSimpleTrack(&track.SimpleTrack, &track.Album, "")
+}
+
+func (c *Client) DownloadAlbum(ctx context.Context, id string) error {
+	album, err := c.api.GetAlbum(ctx, spotifyapi.ID(id))
+	if err != nil {
+		return fmt.Errorf("failed to get album: %w", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(album.Tracks.Tracks))
+
+	for _, track := range album.Tracks.Tracks {
+		os.Mkdir(album.Name, 0755)
+		go func(track *spotifyapi.SimpleTrack) {
+			defer wg.Done()
+			if err := downloadSimpleTrack(track, &album.SimpleAlbum, album.Name+"/"); err != nil {
+				log.Printf("Error downloading track: %v\n", err)
+			}
+		}(&track)
+	}
+
+	wg.Wait()
 	return nil
 }
