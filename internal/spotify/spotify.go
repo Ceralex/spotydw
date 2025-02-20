@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
 
+	"github.com/Ceralex/spotydw/internal/utils"
 	"github.com/Ceralex/spotydw/internal/youtube"
 	_ "github.com/joho/godotenv/autoload"
 	spotifyapi "github.com/zmb3/spotify/v2"
@@ -43,22 +45,6 @@ func NewClient(ctx context.Context) (*Client, error) {
 	return &Client{api: spotifyapi.New(httpClient)}, nil
 }
 
-func ExtractID(url string) string {
-	// Find the last "/" in the URL
-	idStart := strings.LastIndex(url, "/")
-	if idStart < 0 {
-		return ""
-	}
-
-	// Extract the ID part (before "?si=" if present)
-	id := url[idStart+1:]
-	if idx := strings.Index(id, "?"); idx != -1 {
-		id = id[:idx]
-	}
-
-	return id
-}
-
 func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 	track, err := c.api.GetTrack(ctx, spotifyapi.ID(id))
 	if err != nil {
@@ -82,7 +68,7 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 
 	video := youtube.FindClosestVideo(track.TimeDuration(), videos)
 
-	fmt.Println("Downloading track:", track.Name)
+	log.Printf("Downloading track: %s", track.Name)
 	ytdlpCmd := exec.Command(
 		"yt-dlp",
 		"-x",
@@ -97,6 +83,7 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 	}
 	artistsStr := strings.Join(artistNames, "; ")
 	albumArtistsStr := strings.Join(albumArtists, "; ")
+
 	ffmpegCmd := exec.Command(
 		"ffmpeg",
 		"-i", "pipe:0", // Read from stdin
@@ -115,11 +102,14 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 		"-metadata:s:v", "title='Album cover'",
 		"-metadata:s:v", "comment='Cover (front)'",
 		"-y",
-		fmt.Sprintf("%s.mp3", track.Name),
+		fmt.Sprintf("%s.mp3", utils.SanitizeFileName(track.Name)),
 	)
 
 	// Pipe yt-dlp's output to ffmpeg's input
-	ffmpegCmd.Stdin, _ = ytdlpCmd.StdoutPipe()
+	ffmpegCmd.Stdin, err = ytdlpCmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe for yt-dlp: %v", err)
+	}
 	ffmpegCmd.Stdout = nil
 	ffmpegCmd.Stderr = nil
 

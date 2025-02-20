@@ -47,7 +47,7 @@ func processURL(ctx context.Context, client *spotify.Client, url string) error {
 		return fmt.Errorf("unknown URL type: %s", url)
 	}
 
-	id := spotify.ExtractID(url)
+	id := parser.ExtractSpotifyID(url)
 	if id == "" {
 		return fmt.Errorf("failed to extract ID from URL: %s", url)
 	}

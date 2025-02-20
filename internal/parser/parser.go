@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strings"
 )
 
 type UrlType int
@@ -37,12 +38,10 @@ func GetTypeUrl(str string) (UrlType, error) {
 		return UrlTypeUnknown, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
-	// Check if the host is supported
 	if !slices.Contains(supportedHosts, parsedUrl.Host) {
 		return UrlTypeUnknown, errors.New("unsupported host")
 	}
 
-	// Determine the URL type based on the host and path
 	switch parsedUrl.Host {
 	case "open.spotify.com":
 		if spotifyPlaylistRegex.MatchString(parsedUrl.Path) {
@@ -62,4 +61,20 @@ func GetTypeUrl(str string) (UrlType, error) {
 func IsUrl(str string) bool {
 	_, err := url.ParseRequestURI(str)
 	return err == nil
+}
+
+func ExtractSpotifyID(url string) string {
+	// Find the last "/" in the URL
+	idStart := strings.LastIndex(url, "/")
+	if idStart < 0 {
+		return ""
+	}
+
+	// Extract the ID part (before "?si=" if present)
+	id := url[idStart+1:]
+	if idx := strings.Index(id, "?"); idx != -1 {
+		id = id[:idx]
+	}
+
+	return id
 }
