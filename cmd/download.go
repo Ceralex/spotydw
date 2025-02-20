@@ -62,7 +62,9 @@ func processURL(ctx context.Context, client *spotify.Client, url string) error {
 			return fmt.Errorf("failed to download album: %w", err)
 		}
 	case parser.UrlTypeSpotifyPlaylist:
-		return fmt.Errorf("playlist download not yet implemented")
+		if err := client.DownloadPlaylist(ctx, id); err != nil {
+			return fmt.Errorf("failed to download playlist: %w", err)
+		}
 	default:
 		return fmt.Errorf("unsupported URL type: %s", url)
 	}

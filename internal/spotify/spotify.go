@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 
 	"github.com/Ceralex/spotydw/internal/utils"
 	"github.com/Ceralex/spotydw/internal/youtube"
@@ -47,6 +46,8 @@ func NewClient(ctx context.Context) (*Client, error) {
 }
 
 func downloadSimpleTrack(track *spotifyapi.SimpleTrack, album *spotifyapi.SimpleAlbum, outFolder string) error {
+	log.Printf("Downloading track: %s", track.Name)
+
 	artistNames := make([]string, 0, len(track.Artists))
 	for _, artist := range track.Artists {
 		artistNames = append(artistNames, artist.Name)
@@ -64,7 +65,6 @@ func downloadSimpleTrack(track *spotifyapi.SimpleTrack, album *spotifyapi.Simple
 
 	video := youtube.FindClosestVideo(track.TimeDuration(), videos)
 
-	log.Printf("Downloading track: %s", track.Name)
 	ytdlpCmd := exec.Command(
 		"yt-dlp",
 		"-x",
@@ -109,7 +109,7 @@ func downloadSimpleTrack(track *spotifyapi.SimpleTrack, album *spotifyapi.Simple
 		return fmt.Errorf("failed to create stdout pipe for yt-dlp: %v", err)
 	}
 	ffmpegCmd.Stdout = nil
-	ffmpegCmd.Stderr = os.Stderr
+	ffmpegCmd.Stderr = nil
 
 	// Start ffmpeg first
 	if err := ffmpegCmd.Start(); err != nil {
@@ -145,19 +145,28 @@ func (c *Client) DownloadAlbum(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to get album: %w", err)
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(len(album.Tracks.Tracks))
-
 	for _, track := range album.Tracks.Tracks {
 		os.Mkdir(album.Name, 0755)
-		go func(track *spotifyapi.SimpleTrack) {
-			defer wg.Done()
-			if err := downloadSimpleTrack(track, &album.SimpleAlbum, album.Name+"/"); err != nil {
-				log.Printf("Error downloading track: %v\n", err)
-			}
-		}(&track)
+		if err := downloadSimpleTrack(&track, &album.SimpleAlbum, album.Name+"/"); err != nil {
+			log.Printf("Error downloading track: %v\n", err)
+		}
 	}
 
-	wg.Wait()
+	return nil
+}
+
+func (c *Client) DownloadPlaylist(ctx context.Context, id string) error {
+	playlist, err := c.api.GetPlaylist(ctx, spotifyapi.ID(id))
+	if err != nil {
+		return fmt.Errorf("failed to get playlist: %w", err)
+	}
+
+	for _, track := range playlist.Tracks.Tracks {
+		os.Mkdir(playlist.Name, 0755)
+		if err := downloadSimpleTrack(&track.Track.SimpleTrack, &track.Track.Album, playlist.Name+"/"); err != nil {
+			log.Printf("Error downloading track: %v\n", err)
+		}
+	}
+
 	return nil
 }
