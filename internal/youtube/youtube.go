@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"strconv"
@@ -75,7 +76,6 @@ type Text struct {
 }
 
 func SearchVideos(query string) ([]Video, error) {
-
 	body := map[string]interface{}{
 		"query":   query,
 		"context": defaultContext,
@@ -119,13 +119,13 @@ func SearchVideos(query string) ([]Video, error) {
 
 			duration, err := parseDuration(videoData.LengthText.Runs[0].Text)
 			if err != nil {
-				fmt.Println("Error parsing duration: ", err)
+				log.Printf("Error parsing duration: %v", err)
 				continue
 			}
 
 			views, err := parseViews(videoData.ViewCountText.Runs[0].Text)
 			if err != nil {
-				fmt.Println("Error parsing views: ", err)
+				log.Printf("Error parsing views: %v", err)
 				continue
 			}
 
@@ -175,29 +175,27 @@ func parseDuration(duration string) (time.Duration, error) {
 		return 0, errors.New("invalid duration format")
 	}
 
-	// Ensure valid time components
-	if minutes >= 60 || seconds >= 60 {
-		return 0, errors.New("minutes and seconds must be less than 60")
-	}
-
 	// Convert to time.Duration
 	totalSeconds := hours*3600 + minutes*60 + seconds
 	return time.Duration(totalSeconds) * time.Second, nil
 }
 
 func parseViews(views string) (uint64, error) {
+	if views == "No views" {
+		return 0, nil
+	}
 	views = strings.ReplaceAll(strings.ReplaceAll(views, " views", ""), ",", "")
 	return strconv.ParseUint(views, 10, 64)
 }
 
-func FindClosestVideo(target time.Duration, videos []Video) Video {
-	closest := videos[0]
+func FindClosestVideo(target time.Duration, videos []Video) *Video {
+	closest := &videos[0]
 	minDiff := math.Abs(float64(target - videos[0].Duration))
 
 	for _, item := range videos[1:] {
 		diff := math.Abs(float64(target - item.Duration))
 		if diff < minDiff {
-			closest = item
+			closest = &item
 			minDiff = diff
 		}
 	}
