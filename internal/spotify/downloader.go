@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 
 	"github.com/Ceralex/spotydw/internal/utils"
 	"github.com/Ceralex/spotydw/internal/youtube"
@@ -44,7 +45,7 @@ func NewClient(ctx context.Context) (*Client, error) {
 	return &Client{api: spotifyapi.New(httpClient)}, nil
 }
 
-func Download(ctx context.Context, URL *url.URL) error {
+func Download(ctx context.Context, URL *url.URL, concurrentN int) error {
 	client, err := NewClient(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create Spotify client: %v", err)
@@ -59,9 +60,9 @@ func Download(ctx context.Context, URL *url.URL) error {
 	case Track:
 		return client.DownloadTrack(ctx, resource.ID)
 	case Album:
-		return client.DownloadAlbum(ctx, resource.ID)
+		return client.DownloadAlbum(ctx, resource.ID, concurrentN)
 	case Playlist:
-		return client.DownloadPlaylist(ctx, resource.ID)
+		return client.DownloadPlaylist(ctx, resource.ID, concurrentN)
 	}
 
 	return nil
@@ -77,7 +78,7 @@ func (c *Client) DownloadTrack(ctx context.Context, id string) error {
 	return downloadSimpleTrack(&track.SimpleTrack, &track.Album, "")
 }
 
-func (c *Client) DownloadAlbum(ctx context.Context, id string) error {
+func (c *Client) DownloadAlbum(ctx context.Context, id string, concurrentN int) error {
 	album, err := c.api.GetAlbum(ctx, spotifyapi.ID(id))
 	if err != nil {
 		return fmt.Errorf("failed to get album: %w", err)
@@ -86,16 +87,32 @@ func (c *Client) DownloadAlbum(ctx context.Context, id string) error {
 	if err := os.Mkdir(album.Name, 0755); err != nil {
 		return fmt.Errorf("failed to create album directory: %w", err)
 	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(len(album.Tracks.Tracks))
+
+	guard := make(chan struct{}, concurrentN)
+
 	for _, track := range album.Tracks.Tracks {
-		if err := downloadSimpleTrack(&track, &album.SimpleAlbum, album.Name+"/"); err != nil {
-			log.Printf("Error downloading track: %v\n", err)
-		}
+		guard <- struct{}{}
+
+		go func(track *spotifyapi.SimpleTrack, album *spotifyapi.SimpleAlbum) {
+			defer func() {
+				wg.Done()
+				<-guard
+			}()
+
+			if err := downloadSimpleTrack(track, album, album.Name+"/"); err != nil {
+				log.Printf("Error downloading track: %v\n", err)
+			}
+		}(&track, &album.SimpleAlbum)
 	}
 
+	wg.Wait()
 	return nil
 }
 
-func (c *Client) DownloadPlaylist(ctx context.Context, id string) error {
+func (c *Client) DownloadPlaylist(ctx context.Context, id string, concurrentN int) error {
 	playlist, err := c.api.GetPlaylist(ctx, spotifyapi.ID(id))
 	if err != nil {
 		return fmt.Errorf("failed to get playlist: %w", err)
@@ -104,10 +121,25 @@ func (c *Client) DownloadPlaylist(ctx context.Context, id string) error {
 	if err := os.Mkdir(playlist.Name, 0755); err != nil {
 		return fmt.Errorf("failed to create playlist directory: %w", err)
 	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(len(playlist.Tracks.Tracks))
+
+	guard := make(chan struct{}, concurrentN)
+
 	for _, track := range playlist.Tracks.Tracks {
-		if err := downloadSimpleTrack(&track.Track.SimpleTrack, &track.Track.Album, playlist.Name+"/"); err != nil {
-			log.Printf("Error downloading track: %v\n", err)
-		}
+		guard <- struct{}{}
+
+		go func(track *spotifyapi.PlaylistTrack, playlist *spotifyapi.FullPlaylist) {
+			defer func() {
+				wg.Done()
+				<-guard
+			}()
+
+			if err := downloadSimpleTrack(&track.Track.SimpleTrack, &track.Track.Album, playlist.Name+"/"); err != nil {
+				log.Printf("Error downloading track: %v\n", err)
+			}
+		}(&track, playlist)
 	}
 
 	return nil

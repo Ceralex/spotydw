@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var concurrentN int
+
 // downloadCmd represents the download command
 var downloadCmd = &cobra.Command{
 	Use:   "download <URL> [URL...]",
@@ -41,7 +43,7 @@ func processURL(URL string) error {
 
 	switch parsedUrl.Host {
 	case "open.spotify.com":
-		return spotify.Download(context.Background(), parsedUrl)
+		return spotify.Download(context.Background(), parsedUrl, concurrentN)
 	default:
 		return fmt.Errorf("unsupported URL")
 	}
@@ -49,4 +51,5 @@ func processURL(URL string) error {
 
 func init() {
 	rootCmd.AddCommand(downloadCmd)
+	downloadCmd.Flags().IntVarP(&concurrentN, "parallel", "p", 5, "Number of parallel downloads")
 }
