@@ -1,17 +1,23 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/url"
 
+	"github.com/Ceralex/spotydw/internal/service"
 	"github.com/Ceralex/spotydw/internal/spotify"
 	"github.com/Ceralex/spotydw/internal/utils"
 	"github.com/spf13/cobra"
 )
 
 var concurrentN int
+
+// Map of domain names to their respective service implementations
+var serviceMap = map[string]service.Service{
+	"open.spotify.com": spotify.NewService(),
+	// "soundcloud.com" soundcloud.NewService(),
+}
 
 // downloadCmd represents the download command
 var downloadCmd = &cobra.Command{
@@ -41,12 +47,12 @@ func processURL(URL string) error {
 		return fmt.Errorf("error parsing URL: %v", err)
 	}
 
-	switch parsedUrl.Host {
-	case "open.spotify.com":
-		return spotify.Download(context.Background(), parsedUrl, concurrentN)
-	default:
-		return fmt.Errorf("unsupported URL")
+	service, ok := serviceMap[parsedUrl.Host]
+	if !ok {
+		return fmt.Errorf("unsupported service: %s", parsedUrl.Host)
 	}
+
+	return service.Download(parsedUrl, concurrentN)
 }
 
 func init() {

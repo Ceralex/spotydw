@@ -2,7 +2,6 @@ package spotify
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -15,37 +14,16 @@ import (
 	"github.com/Ceralex/spotydw/internal/youtube"
 	_ "github.com/joho/godotenv/autoload"
 	spotifyapi "github.com/zmb3/spotify/v2"
-	spotifyauth "github.com/zmb3/spotify/v2/auth"
-	"golang.org/x/oauth2/clientcredentials"
 )
 
-type Client struct {
-	api *spotifyapi.Client
+type Service struct{}
+
+func NewService() *Service {
+	return &Service{}
 }
 
-func NewClient(ctx context.Context) (*Client, error) {
-	clientID := os.Getenv("SPOTIFY_ID")
-	clientSecret := os.Getenv("SPOTIFY_SECRET")
-	if clientID == "" || clientSecret == "" {
-		return nil, errors.New("missing required environment variables: SPOTIFY_ID and/or SPOTIFY_SECRET")
-	}
-
-	config := &clientcredentials.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		TokenURL:     spotifyauth.TokenURL,
-	}
-
-	token, err := config.Token(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get access token: %w", err)
-	}
-
-	httpClient := spotifyauth.New().Client(ctx, token)
-	return &Client{api: spotifyapi.New(httpClient)}, nil
-}
-
-func Download(ctx context.Context, URL *url.URL, concurrentN int) error {
+func (s *Service) Download(URL *url.URL, concurrentN int) error {
+	ctx := context.Background()
 	client, err := NewClient(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create Spotify client: %v", err)
@@ -88,24 +66,19 @@ func (c *Client) DownloadAlbum(ctx context.Context, id string, concurrentN int) 
 		return fmt.Errorf("failed to create album directory: %w", err)
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(len(album.Tracks.Tracks))
-
 	guard := make(chan struct{}, concurrentN)
+	wg := sync.WaitGroup{}
 
 	for _, track := range album.Tracks.Tracks {
+		wg.Add(1)
 		guard <- struct{}{}
 
-		go func(track *spotifyapi.SimpleTrack, album *spotifyapi.SimpleAlbum) {
-			defer func() {
-				wg.Done()
-				<-guard
-			}()
-
-			if err := downloadSimpleTrack(track, album, album.Name+"/"); err != nil {
-				log.Printf("Error downloading track: %v\n", err)
+		go func(track spotifyapi.SimpleTrack) {
+			defer func() { <-guard; wg.Done() }()
+			if err := downloadSimpleTrack(&track, &album.SimpleAlbum, album.Name+"/"); err != nil {
+				log.Printf("Error downloading track %s: %v", track.Name, err)
 			}
-		}(&track, &album.SimpleAlbum)
+		}(track)
 	}
 
 	wg.Wait()
@@ -122,45 +95,42 @@ func (c *Client) DownloadPlaylist(ctx context.Context, id string, concurrentN in
 		return fmt.Errorf("failed to create playlist directory: %w", err)
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(len(playlist.Tracks.Tracks))
-
 	guard := make(chan struct{}, concurrentN)
+	wg := sync.WaitGroup{}
 
 	for _, track := range playlist.Tracks.Tracks {
+		wg.Add(1)
 		guard <- struct{}{}
 
-		go func(track *spotifyapi.PlaylistTrack, playlist *spotifyapi.FullPlaylist) {
-			defer func() {
-				wg.Done()
-				<-guard
-			}()
-
+		go func(track spotifyapi.PlaylistTrack) {
+			defer func() { <-guard; wg.Done() }()
 			if err := downloadSimpleTrack(&track.Track.SimpleTrack, &track.Track.Album, playlist.Name+"/"); err != nil {
-				log.Printf("Error downloading track: %v\n", err)
+				log.Printf("Error downloading track %s: %v", track.Track.Name, err)
 			}
-		}(&track, playlist)
+		}(track)
 	}
 
+	wg.Wait()
 	return nil
 }
 
 func downloadSimpleTrack(track *spotifyapi.SimpleTrack, album *spotifyapi.SimpleAlbum, outFolder string) error {
 	fmt.Printf("Downloading track: %s\n", track.Name)
 
+	// Build the search query
 	searchQuery := fmt.Sprintf("%s - %s", track.Name, joinArtists(track.Artists, ", "))
-
 	videos, err := youtube.SearchVideos(searchQuery)
 	if err != nil {
-		return fmt.Errorf("youtube search failed: %w", err)
+		return fmt.Errorf("YouTube search failed: %w", err)
 	}
-
 	if len(videos) == 0 {
 		return fmt.Errorf("no YouTube videos found for: %s", searchQuery)
 	}
 
+	// Find the closest video
 	video := youtube.FindClosestVideo(track.TimeDuration(), videos)
 
+	// Prepare yt-dlp command
 	ytdlpCmd := exec.Command(
 		"yt-dlp",
 		"-x",
@@ -169,8 +139,8 @@ func downloadSimpleTrack(track *spotifyapi.SimpleTrack, album *spotifyapi.Simple
 		fmt.Sprintf("https://youtu.be/%s", video.ID),
 	)
 
+	// Prepare ffmpeg command
 	fileName := filepath.Join(outFolder, utils.SanitizeFileName(track.Name)+".mp3")
-
 	ffmpegCmd := exec.Command(
 		"ffmpeg",
 		"-i", "pipe:0", // Read from stdin
@@ -186,33 +156,26 @@ func downloadSimpleTrack(track *spotifyapi.SimpleTrack, album *spotifyapi.Simple
 		"-map", "1",
 		"-c:v", "mjpeg",
 		"-q:v", "2",
-		"-metadata:s:v", "title='Album cover'",
-		"-metadata:s:v", "comment='Cover (front)'",
+		"-metadata:s:v", "title=Album cover",
+		"-metadata:s:v", "comment=Cover (front)",
 		"-y",
 		fileName,
 	)
 
 	// Pipe yt-dlp's output to ffmpeg's input
-	ffmpegCmd.Stdin, err = ytdlpCmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe for yt-dlp: %v", err)
+	if ffmpegCmd.Stdin, err = ytdlpCmd.StdoutPipe(); err != nil {
+		return fmt.Errorf("failed to create stdout pipe for yt-dlp: %w", err)
 	}
-	ffmpegCmd.Stdout = nil
-	ffmpegCmd.Stderr = nil
 
-	// Start ffmpeg first
+	// Start ffmpeg and yt-dlp commands
 	if err := ffmpegCmd.Start(); err != nil {
-		return fmt.Errorf("failed to start ffmpeg: %v", err)
+		return fmt.Errorf("failed to start ffmpeg: %w", err)
 	}
-
-	// Run yt-dlp and pipe to ffmpeg
 	if err := ytdlpCmd.Run(); err != nil {
-		return fmt.Errorf("failed to run yt-dlp: %v", err)
+		return fmt.Errorf("failed to run yt-dlp: %w", err)
 	}
-
-	// Wait for ffmpeg to finish
 	if err := ffmpegCmd.Wait(); err != nil {
-		return fmt.Errorf("failed to process with ffmpeg: %v", err)
+		return fmt.Errorf("failed to process with ffmpeg: %w", err)
 	}
 
 	return nil
